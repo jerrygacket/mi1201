@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, FileUtil, TAGraph, Forms, Controls, Graphics, Dialogs,
-  StdCtrls, SdpoSerial, IniFiles;
+  StdCtrls, SdpoSerial, IniFiles, strutils,Math;
 
 type
 
@@ -15,6 +15,8 @@ type
   TForm1 = class(TForm)
     MassConnect: TButton;
     MassConnectPort: TSdpoSerial;
+    Memo1: TMemo;
+    Memo2: TMemo;
     TempConnectPort: TSdpoSerial;
     IntensConnectPort: TSdpoSerial;
     TempConnect: TButton;
@@ -29,7 +31,10 @@ type
     TempConnectPortLabel: TLabel;
     IntensConnectPortLabel: TLabel;
     procedure Button4Click(Sender: TObject);
+    procedure Button5Click(Sender: TObject);
     procedure FormCreate(Sender: TObject);
+    procedure IntensConnectPortRxData(Sender: TObject);
+    procedure MassConnectPortRxData(Sender: TObject);
     procedure OnPortRxData(Sender: TObject);
     procedure PortButtonClick(Sender: TObject);
     procedure PortConfig(PortName:string);
@@ -48,6 +53,7 @@ var
   // временно. потом PortStrings брать из конфига
   PortStrings: array [0..2] of string = ('MassConnectPort','TempConnectPort','IntensConnectPort');
   PortNames: TStringList;  // потому что здесь есть indexOf. после PHP тяжкооо
+  massString:array of integer;
 
 implementation
 
@@ -127,12 +133,67 @@ begin
     end;
 end;
 
+procedure TForm1.IntensConnectPortRxData(Sender: TObject);
+begin
+      //buff[portIndex] := buff[portIndex] + IntensConnectPort.ReadData;
+      //Form1.IntensDrow(IntensConnectPort.ReadData);
+  IntensConnectPortLabel.Caption:=IntensConnectPort.ReadData;
+end;
+
+function HexToInt(Str : string): integer;
+var i, r : integer;
+begin
+  val('$'+Trim(Str),r, i);
+  if i<>0 then HexToInt := 0 {была ошибка в написании числа}
+  else HexToInt := r;
+end;
+
+procedure TForm1.MassConnectPortRxData(Sender: TObject);
+var
+  i:integer;
+  digits:float;
+begin
+  setlength(massString,length(massString)+1);
+  massString[length(massString)-1] :=MassConnectPort.SynSer.RecvByte(1000);
+if length(massString) = 59 then
+  begin
+    digits:=massString[34] + massString[35] * power(2, 8);
+    case massString[37] of
+    0:digits:=digits/1;
+    1:digits:=digits/10;
+    2:digits:=digits/100;
+    4:digits:=digits/1000;
+    8:digits:=digits/10000;
+    end;
+    MassConnectPortLabel.Caption:=floattostr(digits);
+    //Memo1.Lines.Clear;
+    //Memo2.Lines.Clear;
+    //Memo2.Lines.Add(inttostr(length(massString)));
+    //for i:=0 to length(massString)-1 do
+    //  begin
+    //    Memo1.Lines.Add(inttostr(i)+': '+inttostr(massString[i]));
+    //  end;
+    setlength(massString,0);
+    MassConnectPort.WriteData(chr($55)+chr($55)+chr($00)+chr($00)+chr($AA));
+  end;
+end;
+
 procedure TForm1.Button4Click(Sender: TObject);
 var
   i:integer;
   cb:array [0..17] of string;
 begin
-   IntensConnectPort.ReadData;
+Memo1.Lines.Clear;
+Memo2.Lines.Clear;
+//Memo1.Lines.Add(massString);
+//memo2.Lines.Add(inttostr(length(massString)));
+//massString:='';
+//for i:=1 to length(massString)-1 do
+//      begin
+//        Memo1.Lines.Add(massString[i]);
+//      end;
+if not IntensConnectPort.Active then exit;
+  IntensConnectPort.ReadData;
    cb[0]:='*RST';
    cb[1]:='SYST:ZCH ON';
    cb[2]:='RANG 2e-9';//+inttostr(radiogroup1.ItemIndex+2);
@@ -168,7 +229,19 @@ begin
        IntensConnectPort.WriteData(cb[i]+chr(13));
        sleep(200);
      end;
-   IntensConnectPort.WriteData('READ?'+chr(13));
+   //IntensConnectPort.WriteData('READ?'+chr(13));
+end;
+
+procedure TForm1.Button5Click(Sender: TObject);
+begin
+  IntensConnectPort.WriteData('READ?'+chr(13));
+//massString := '';
+//MassConnectPort.SynSer.SendByte($55);
+//MassConnectPort.SynSer.SendByte($55);
+//MassConnectPort.SynSer.SendByte($00);
+//MassConnectPort.SynSer.SendByte($00);
+//MassConnectPort.SynSer.SendByte($AA);
+//MassConnectPort.WriteData(chr($55)+chr($55)+chr($00)+chr($00)+chr($AA));
 end;
 
 procedure TForm1.OnPortRxData(Sender: TObject);
@@ -182,12 +255,17 @@ begin
       buff[portIndex] := buff[portIndex] + ReadData;
       //if pos(#13,buff[portIndex]) = 0 then exit;
       case portIndex of
-      0:TLabel(Form1.FindComponent(Name + 'Label')).caption := buff[portIndex];
+      0:
+        begin
+          memo1.Lines.Add(ReadData);
+          if length(buff[portIndex]) = 19 then
+             TLabel(Form1.FindComponent(Name + 'Label')).caption := buff[portIndex];
+        end;
       1:TLabel(Form1.FindComponent(Name + 'Label')).caption := buff[portIndex];
       2:
         begin
 //          if (buff[portIndex][length(buff[portIndex])]=#13) then
-            if pos(#13,buff[portIndex]) <> 0 then
+            //if pos(#13,buff[portIndex]) <> 0 then
              Form1.IntensDrow(buff[portIndex]);
         end;
       end;
@@ -234,7 +312,7 @@ end;
 procedure TForm1.IntensDrow(intense:string);
 begin
   IntensConnectPortLabel.caption := intense;
-  IntensConnectPort.WriteData('READ?'+chr(13));
+  //IntensConnectPort.WriteData('READ?'+chr(13));
 end;
 
 procedure TForm1.PortButtonClick(Sender: TObject);
@@ -253,11 +331,12 @@ begin
       end
     else
       begin
-        TSdpoSerial(port).Device := GetConfig(portName,'Device');
+        //TSdpoSerial(port).Device := GetConfig(portName,'Device');
         TSdpoSerial(port).Open;
         if TSdpoSerial(port).Active then
           begin
-            PortConfig(portName);
+            //PortConfig(portName);
+            if portName = 'MassConnectPort' then MassConnectPort.WriteData(chr($55)+chr($55)+chr($00)+chr($00)+chr($AA));
             Caption:='Подключено';
           end;
       end;
@@ -265,4 +344,5 @@ begin
 end;
 
 end.
+
 
